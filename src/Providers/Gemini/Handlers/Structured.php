@@ -2,12 +2,16 @@
 
 namespace EchoLabs\Prism\Providers\Gemini\Handlers;
 
+use EchoLabs\Prism\Enums\Provider;
 use EchoLabs\Prism\Exceptions\PrismException;
 use EchoLabs\Prism\Providers\Gemini\Maps\FinishReasonMap;
 use EchoLabs\Prism\Providers\Gemini\Maps\MessageMap;
 use EchoLabs\Prism\Providers\Gemini\Maps\SchemaMap;
 use EchoLabs\Prism\Structured\Request;
-use EchoLabs\Prism\ValueObjects\ProviderResponse;
+use EchoLabs\Prism\Structured\Response as StructuredResponse;
+use EchoLabs\Prism\Structured\ResponseBuilder;
+use EchoLabs\Prism\Structured\Step;
+use EchoLabs\Prism\ValueObjects\Messages\AssistantMessage;
 use EchoLabs\Prism\ValueObjects\ResponseMeta;
 use EchoLabs\Prism\ValueObjects\Usage;
 use Illuminate\Http\Client\PendingRequest;
@@ -16,14 +20,19 @@ use Throwable;
 
 class Structured
 {
-    public function __construct(protected PendingRequest $client) {}
+    protected ResponseBuilder $responseBuilder;
 
-    public function handle(Request $request): ProviderResponse
+    public function __construct(protected PendingRequest $client)
+    {
+        $this->responseBuilder = new ResponseBuilder;
+    }
+
+    public function handle(Request $request): StructuredResponse
     {
         try {
             $response = $this->sendRequest($request);
         } catch (Throwable $e) {
-            throw PrismException::providerRequestError($request->model, $e);
+            throw PrismException::providerRequestError($request->model(), $e);
         }
 
         $data = $response->json();
@@ -38,41 +47,52 @@ class Structured
             ));
         }
 
-        return new ProviderResponse(
+        $responseMessage = new AssistantMessage(
+            data_get($data, 'candidates.0.content.parts.0.text') ?? '',
+        );
+
+        $this->responseBuilder->addResponseMessage($responseMessage);
+
+        $this->responseBuilder->addStep(new Step(
             text: data_get($data, 'candidates.0.content.parts.0.text') ?? '',
-            toolCalls: [],
+            finishReason: FinishReasonMap::map(
+                data_get($data, 'candidates.0.finishReason'),
+            ),
             usage: new Usage(
                 data_get($data, 'usageMetadata.promptTokenCount', 0),
                 data_get($data, 'usageMetadata.candidatesTokenCount', 0)
             ),
-            finishReason: FinishReasonMap::map(
-                data_get($data, 'candidates.0.finishReason'),
-            ),
             responseMeta: new ResponseMeta(
                 id: data_get($data, 'id', ''),
                 model: data_get($data, 'modelVersion'),
-            )
+            ),
+            messages: $request->messages(),
+            systemPrompts: $request->systemPrompts(),
+            additionalContent: [],
+        )
         );
+
+        return $this->responseBuilder->toResponse();
     }
 
     public function sendRequest(Request $request): Response
     {
-        $endpoint = "{$request->model}:generateContent";
+        $endpoint = "{$request->model()}:generateContent";
 
-        $payload = (new MessageMap($request->messages, $request->systemPrompt))();
+        $payload = (new MessageMap($request->messages(), $request->systemPrompts()))();
 
-        $responseSchema = new SchemaMap($request->schema);
+        new SchemaMap($request->schema());
 
         $payload['generationConfig'] = array_merge([
             'response_mime_type' => 'application/json',
-            'response_schema' => $responseSchema->toArray(),
+            //            'response_schema' => $responseSchema->toArray(),
         ], array_filter([
-            'temperature' => $request->temperature,
-            'topP' => $request->topP,
-            'maxOutputTokens' => $request->maxTokens,
+            'temperature' => $request->temperature(),
+            'topP' => $request->topP(),
+            'maxOutputTokens' => $request->maxTokens(),
         ]));
 
-        $safetySettings = data_get($request->providerMeta, 'safetySettings');
+        $safetySettings = data_get($request->providerMeta(Provider::Gemini), 'safetySettings');
         if (! empty($safetySettings)) {
             $payload['safetySettings'] = $safetySettings;
         }

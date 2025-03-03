@@ -42,8 +42,8 @@ readonly class Gemini implements Provider
     public function structured(StructuredRequest $request): StructuredResponse
     {
         $handler = new Structured($this->client(
-            $request->clientOptions,
-            $request->clientRetry
+            $request->clientOptions(),
+            $request->clientRetry()
         ));
 
         return $handler->handle($request);
