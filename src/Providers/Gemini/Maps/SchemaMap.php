@@ -22,8 +22,8 @@ class SchemaMap
         return array_merge([
             'type' => $this->mapType(),
             ...array_filter([
-                ...$this->schema->toArray(),
                 'additionalProperties' => null,
+                'nullable' => $this->schema->nullable,
             ]),
         ], array_filter([
             'items' => property_exists($this->schema, 'items') ?

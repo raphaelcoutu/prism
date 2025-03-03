@@ -81,11 +81,11 @@ class Structured
 
         $payload = (new MessageMap($request->messages(), $request->systemPrompts()))();
 
-        new SchemaMap($request->schema());
+        $responseSchema = new SchemaMap($request->schema());
 
         $payload['generationConfig'] = array_merge([
             'response_mime_type' => 'application/json',
-            //            'response_schema' => $responseSchema->toArray(),
+            'response_schema' => $responseSchema->toArray(),
         ], array_filter([
             'temperature' => $request->temperature(),
             'topP' => $request->topP(),
